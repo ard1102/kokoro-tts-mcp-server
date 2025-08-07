@@ -24,7 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Copy requirements first for better caching
-COPY requirements.txt .
+COPY prod/requirements.txt .
 
 # Install Python dependencies to user directory
 RUN pip install --user --no-cache-dir --upgrade pip setuptools wheel && \
@@ -49,7 +49,7 @@ LABEL org.opencontainers.image.title="Kokoro TTS MCP Server" \
       org.opencontainers.image.url="https://github.com/ard1102/kokoro-tts-mcp-server" \
       org.opencontainers.image.source="https://github.com/ard1102/kokoro-tts-mcp-server" \
       org.opencontainers.image.documentation="https://github.com/ard1102/kokoro-tts-mcp-server/blob/main/README.md" \
-      maintainer="ard1102 <131929269+ard1102@users.noreply.github.com>"
+      maintainer="ard1102 <ard1102@github.com>"
 
 # Install runtime dependencies only
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -68,7 +68,7 @@ WORKDIR /app
 COPY --from=builder /root/.local /home/mcp/.local
 
 # Copy application files
-COPY --chown=mcp:mcp . .
+COPY --chown=mcp:mcp prod/ .
 
 # Create non-root user for security
 RUN groupadd -r mcp && useradd -r -g mcp -d /app -s /bin/bash mcp
@@ -79,7 +79,7 @@ RUN mkdir -p /app/audio_output /app/logs && \
 
 # Set comprehensive environment variables
 ENV PATH=/home/mcp/.local/bin:$PATH \
-    PYTHONPATH=/app \
+    PYTHONPATH=/app:/home/mcp/.local/lib/python3.11/site-packages \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
