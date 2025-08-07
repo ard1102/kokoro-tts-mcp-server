@@ -1,0 +1,20 @@
+# MCP Server Dependencies
+mcp>=1.0.0
+pydantic>=2.0.0
+requests>=2.31.0
+
+# HTTP server dependencies for containerized deployment
+fastapi>=0.104.0
+uvicorn>=0.24.0
+mcp[fastapi]>=1.0.0
+
+# Audio playback dependencies (cross-platform Python libraries)
+pygame>=2.5.0
+pydub>=0.25.1
+sounddevice>=0.4.6
+numpy>=1.24.0
+# simpleaudio>=1.0.4  # Commented out - requires Visual C++ build tools on Windows
+
+# Optional dependencies for enhanced functionality
+aiohttp>=3.8.0
+typing-extensions>=4.0.0
