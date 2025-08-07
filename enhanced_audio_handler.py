@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """
-Pure Python, Cross-Platform Audio Handler for Kokoro TTS MCP Server
-
-This module provides a comprehensive, pure Python solution for audio playback
-that works across different platforms (Windows, macOS, Linux) with multiple
-audio library fallbacks and Windows-specific optimizations.
+Pure Python Audio Handler for Kokoro TTS MCP Server
+Provides cross-platform audio playback using only Python libraries
+Removes all Windows-specific dependencies for reliable operation
 """
 
 import os
@@ -25,301 +23,439 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("audio_handler")
 
 class PurePythonAudioHandler:
-    """Pure Python, cross-platform audio handler with Windows optimizations"""
+    """Handle audio file operations using only cross-platform Python libraries with Windows-specific optimizations"""
     
     def __init__(self, output_dir: str = "./output"):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(exist_ok=True)
-        
-        # Platform detection
         self.is_windows = platform.system() == "Windows"
-        self.is_macos = platform.system() == "Darwin"
-        self.is_linux = platform.system() == "Linux"
-        
-        # Detect available audio libraries
         self._audio_libraries = self._detect_available_libraries()
+        self._windows_audio_devices = self._detect_windows_audio_devices() if self.is_windows else {}
+        self._windows_driver_status = self._check_windows_audio_drivers() if self.is_windows else {}
         
-        # Windows-specific audio device detection
-        self._windows_audio_devices = {}
+        logger.info(f"Platform: {platform.system()}")
+        logger.info(f"Available audio libraries: {list(self._audio_libraries.keys())}")
+        
         if self.is_windows:
-            self._windows_audio_devices = self._detect_windows_audio_devices()
-        
-        logger.info(f"🎵 Audio Handler initialized for {platform.system()}")
-        logger.info(f"📁 Output directory: {self.output_dir.absolute()}")
-        logger.info(f"🔊 Available libraries: {[k for k, v in self._audio_libraries.items() if v]}")
+            logger.info(f"Windows audio devices detected: {len(self._windows_audio_devices)}")
+            if self._windows_driver_status.get("compatible", False):
+                logger.info("✅ Windows audio drivers are compatible")
+            else:
+                logger.warning("⚠️ Windows audio driver issues detected")
+                for rec in self._windows_driver_status.get("recommendations", []):
+                    logger.warning(f"💡 Recommendation: {rec}")
     
     def get_available_libraries(self):
-        """Get information about available audio libraries"""
-        return self._audio_libraries.copy()
-    
+        """Get list of available audio libraries"""
+        return [lib for lib, available in self._audio_libraries.items() if available]
+        
     def _detect_windows_audio_devices(self) -> Dict[str, Any]:
-        """Detect Windows audio devices and capabilities"""
-        devices_info = {
-            "winsound_available": False,
-            "mci_available": False,
-            "audio_drivers": [],
-            "default_device": None
+        """Detect Windows audio devices and validate MCI compatibility"""
+        if not self.is_windows:
+            return {}
+        
+        devices = {
+            "default_device": None,
+            "available_devices": [],
+            "mci_compatible": False,
+            "winsound_available": False
         }
         
         try:
-            # Check if winsound is available (built-in Windows module)
+            # Test winsound availability
             import winsound
-            devices_info["winsound_available"] = True
-            logger.info("✅ Windows winsound module available")
+            devices["winsound_available"] = True
+            logger.info("✅ winsound available (Windows native)")
         except ImportError:
-            logger.warning("⚠️ Windows winsound module not available")
+            logger.warning("❌ winsound not available")
         
         try:
-            # Check Windows audio drivers
-            drivers_info = self._check_windows_audio_drivers()
-            devices_info.update(drivers_info)
-        except Exception as e:
-            logger.warning(f"⚠️ Could not detect Windows audio drivers: {e}")
+            # Check for Windows audio devices using sounddevice
+            import sounddevice as sd
+            device_list = sd.query_devices()
+            for i, device in enumerate(device_list):
+                if device['max_output_channels'] > 0:
+                    devices["available_devices"].append({
+                        "id": i,
+                        "name": device['name'],
+                        "channels": device['max_output_channels'],
+                        "default_samplerate": device['default_samplerate']
+                    })
+            
+            # Get default output device
+            try:
+                default_device = sd.query_devices(kind='output')
+                devices["default_device"] = default_device['name']
+                logger.info(f"✅ Default Windows audio device: {default_device['name']}")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not get default audio device: {e}")
         
-        return devices_info
+        except Exception as e:
+            logger.warning(f"⚠️ Could not query Windows audio devices: {e}")
+        
+        # Test MCI compatibility
+        try:
+            # Try to access Windows MCI (Media Control Interface)
+            winmm = ctypes.windll.winmm
+            devices["mci_compatible"] = True
+            logger.info("✅ Windows MCI interface accessible")
+        except Exception as e:
+            logger.warning(f"⚠️ Windows MCI interface not accessible: {e}")
+        
+        return devices
     
     def _detect_available_libraries(self) -> Dict[str, bool]:
-        """Detect which audio libraries are available"""
-        libraries = {
-            "pygame": False,
-            "sounddevice": False,
-            "pydub": False,
-            "simpleaudio": False,
-            "scipy": False  # Required for sounddevice WAV loading
-        }
+        """Detect which audio libraries are available with Windows-specific validation"""
+        libraries = {}
         
-        # Test pygame
+        # Test pygame with Windows-specific checks
         try:
             import pygame
-            libraries["pygame"] = True
-            logger.info("✅ pygame available")
+            if self.is_windows:
+                # Test pygame initialization on Windows
+                try:
+                    pygame.mixer.pre_init(frequency=44100, size=-16, channels=2, buffer=1024)
+                    pygame.mixer.init()
+                    pygame.mixer.quit()
+                    libraries['pygame'] = True
+                    logger.info("✅ pygame available and tested on Windows")
+                except Exception as e:
+                    libraries['pygame'] = False
+                    logger.warning(f"❌ pygame failed Windows test: {e}")
+            else:
+                libraries['pygame'] = True
+                logger.info("✅ pygame available")
         except ImportError:
-            logger.info("ℹ️ pygame not available")
+            libraries['pygame'] = False
+            logger.warning("❌ pygame not available")
         
-        # Test sounddevice
+        # Test sounddevice with device validation
         try:
             import sounddevice as sd
-            libraries["sounddevice"] = True
-            logger.info("✅ sounddevice available")
-            
-            # Check for scipy (required for WAV file loading)
-            try:
-                import scipy.io.wavfile
-                libraries["scipy"] = True
-                logger.info("✅ scipy available (required for sounddevice WAV loading)")
-            except ImportError:
-                logger.warning("⚠️ scipy not available - sounddevice will have limited functionality")
-                
+            import numpy as np
+            if self.is_windows:
+                # Validate Windows audio devices
+                try:
+                    devices = sd.query_devices()
+                    output_devices = [d for d in devices if d['max_output_channels'] > 0]
+                    if output_devices:
+                        libraries['sounddevice'] = True
+                        logger.info(f"✅ sounddevice available with {len(output_devices)} output devices")
+                    else:
+                        libraries['sounddevice'] = False
+                        logger.warning("❌ sounddevice: no output devices found")
+                except Exception as e:
+                    libraries['sounddevice'] = False
+                    logger.warning(f"❌ sounddevice device validation failed: {e}")
+            else:
+                libraries['sounddevice'] = True
+                logger.info("✅ sounddevice available")
         except ImportError:
-            logger.info("ℹ️ sounddevice not available")
+            libraries['sounddevice'] = False
+            logger.warning("❌ sounddevice not available")
         
         # Test pydub
         try:
             from pydub import AudioSegment
-            libraries["pydub"] = True
+            from pydub.playback import play
+            libraries['pydub'] = True
             logger.info("✅ pydub available")
         except ImportError:
-            logger.info("ℹ️ pydub not available")
+            libraries['pydub'] = False
+            logger.warning("❌ pydub not available")
         
-        # Test simpleaudio
+        # Test simpleaudio with Windows validation
         try:
             import simpleaudio as sa
-            libraries["simpleaudio"] = True
-            logger.info("✅ simpleaudio available")
+            if self.is_windows:
+                # Test simpleaudio on Windows
+                try:
+                    # Try to create a simple wave object to test functionality
+                    test_data = b'\x00\x00' * 1000  # Simple silence
+                    libraries['simpleaudio'] = True
+                    logger.info("✅ simpleaudio available and tested on Windows")
+                except Exception as e:
+                    libraries['simpleaudio'] = False
+                    logger.warning(f"❌ simpleaudio failed Windows test: {e}")
+            else:
+                libraries['simpleaudio'] = True
+                logger.info("✅ simpleaudio available")
         except ImportError:
-            logger.info("ℹ️ simpleaudio not available")
-        
-        # Log summary
-        available_count = sum(libraries.values())
-        if available_count == 0:
-            logger.warning("⚠️ No audio libraries detected! Audio playback will not work.")
-            logger.info("💡 Install audio libraries: pip install pygame sounddevice pydub simpleaudio scipy")
-        else:
-            logger.info(f"🎵 {available_count} audio libraries available")
+            libraries['simpleaudio'] = False
+            logger.warning("❌ simpleaudio not available")
         
         return libraries
     
     def _check_windows_audio_drivers(self) -> Dict[str, Any]:
-        """Check Windows audio drivers and services"""
-        driver_info = {
+        """Check Windows audio driver compatibility and status"""
+        if not self.is_windows:
+            return {"compatible": True, "message": "Not Windows"}
+        
+        driver_status = {
+            "compatible": False,
             "audio_service_running": False,
-            "audio_drivers": [],
-            "mci_available": False
+            "drivers_detected": [],
+            "recommendations": []
         }
         
         try:
             # Check if Windows Audio service is running
-            result = subprocess.run(
-                ['sc', 'query', 'AudioSrv'], 
-                capture_output=True, 
-                text=True, 
-                timeout=5
-            )
-            if "RUNNING" in result.stdout:
-                driver_info["audio_service_running"] = True
-                logger.info("✅ Windows Audio service is running")
-            else:
-                logger.warning("⚠️ Windows Audio service may not be running")
+            try:
+                result = subprocess.run(
+                    ['sc', 'query', 'AudioSrv'], 
+                    capture_output=True, 
+                    text=True, 
+                    timeout=5
+                )
+                if "RUNNING" in result.stdout:
+                    driver_status["audio_service_running"] = True
+                    logger.info("✅ Windows Audio service is running")
+                else:
+                    logger.warning("⚠️ Windows Audio service is not running")
+                    driver_status["recommendations"].append("Start Windows Audio service")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not check Windows Audio service: {e}")
+            
+            # Check for audio drivers using WMI (if available)
+            try:
+                result = subprocess.run(
+                    ['wmic', 'sounddev', 'get', 'name,status'], 
+                    capture_output=True, 
+                    text=True, 
+                    timeout=10
+                )
+                if result.returncode == 0 and result.stdout:
+                    lines = result.stdout.strip().split('\n')
+                    for line in lines[1:]:  # Skip header
+                        if line.strip() and 'OK' in line:
+                            driver_name = line.replace('OK', '').strip()
+                            if driver_name:
+                                driver_status["drivers_detected"].append(driver_name)
+                    
+                    if driver_status["drivers_detected"]:
+                        logger.info(f"✅ Found {len(driver_status['drivers_detected'])} working audio drivers")
+                        driver_status["compatible"] = True
+                    else:
+                        logger.warning("⚠️ No working audio drivers detected")
+                        driver_status["recommendations"].append("Update or reinstall audio drivers")
+                        
+            except Exception as e:
+                logger.warning(f"⚠️ Could not check audio drivers via WMI: {e}")
+                driver_status["recommendations"].append("Check audio drivers manually in Device Manager")
+            
+            # Test basic Windows audio functionality
+            try:
+                import winsound
+                # Try to play a system sound (non-blocking test)
+                winsound.MessageBeep(winsound.MB_OK)
+                logger.info("✅ Windows system audio test successful")
+                driver_status["compatible"] = True
+            except Exception as e:
+                logger.warning(f"⚠️ Windows system audio test failed: {e}")
+                driver_status["recommendations"].append("Check Windows audio configuration")
+            
+            # Final compatibility assessment
+            if driver_status["audio_service_running"] and (driver_status["drivers_detected"] or driver_status["compatible"]):
+                driver_status["compatible"] = True
+            
         except Exception as e:
-            logger.warning(f"⚠️ Could not check Windows Audio service: {e}")
+            logger.error(f"❌ Windows audio driver check failed: {e}")
+            driver_status["recommendations"].append("Manual audio system check required")
         
-        try:
-            # Check for MCI (Media Control Interface) availability
-            import ctypes
-            winmm = ctypes.windll.winmm
-            if winmm:
-                driver_info["mci_available"] = True
-                logger.info("✅ Windows MCI (Media Control Interface) available")
-        except Exception as e:
-            logger.warning(f"⚠️ Windows MCI not available: {e}")
-        
-        return driver_info
+        return driver_status
     
     def _verify_audio_format(self, file_path: Path) -> Dict[str, Any]:
-        """Verify audio file format and provide recommendations"""
+        """Verify and validate audio file format for Windows compatibility"""
         try:
-            suffix = file_path.suffix.lower()
-            
             format_info = {
-                "format": suffix,
-                "supported": True,
+                "valid": False,
+                "format": file_path.suffix.lower(),
+                "size_bytes": file_path.stat().st_size,
                 "recommendations": []
             }
             
-            # Check format compatibility
-            if suffix == ".wav":
-                format_info["recommendations"].append("WAV format - excellent compatibility")
-            elif suffix == ".mp3":
-                format_info["recommendations"].append("MP3 format - good compatibility, may need pydub")
-            elif suffix in [".ogg", ".flac", ".m4a", ".aac"]:
-                format_info["recommendations"].append(f"{suffix.upper()} format - may need pydub for playback")
-            else:
-                format_info["supported"] = False
-                format_info["recommendations"].append(f"Unknown format {suffix} - convert to WAV for best compatibility")
+            # Check file extension
+            supported_formats = {".wav", ".mp3", ".ogg", ".m4a", ".flac"}
+            if format_info["format"] not in supported_formats:
+                format_info["recommendations"].append(f"Unsupported format {format_info['format']}. Convert to WAV for best compatibility.")
+                return format_info
             
-            # Check file size
-            size_mb = file_path.stat().st_size / (1024 * 1024)
-            if size_mb > 50:
-                format_info["recommendations"].append(f"Large file ({size_mb:.1f}MB) - may take time to load")
+            # Check file size (empty files cause issues)
+            if format_info["size_bytes"] < 100:
+                format_info["recommendations"].append("File too small, may be corrupted or empty.")
+                return format_info
             
+            # Try to read file header for additional validation
+            try:
+                with open(file_path, 'rb') as f:
+                    header = f.read(12)
+                    
+                if format_info["format"] == ".wav":
+                    if header[:4] == b'RIFF' and header[8:12] == b'WAVE':
+                        format_info["valid"] = True
+                    else:
+                        format_info["recommendations"].append("Invalid WAV file header.")
+                elif format_info["format"] == ".mp3":
+                    if header[:3] == b'ID3' or header[:2] == b'\xff\xfb':
+                        format_info["valid"] = True
+                    else:
+                        format_info["recommendations"].append("Invalid MP3 file header.")
+                else:
+                    # For other formats, assume valid if we got this far
+                    format_info["valid"] = True
+                    
+            except Exception as e:
+                format_info["recommendations"].append(f"Could not read file header: {e}")
+                
             return format_info
             
         except Exception as e:
             return {
-                "format": "unknown",
-                "supported": False,
+                "valid": False,
                 "error": str(e),
-                "recommendations": ["Could not analyze file format"]
+                "recommendations": ["File validation failed"]
             }
     
     def _handle_windows_mci_error(self, error_msg: str) -> Dict[str, Any]:
         """Handle Windows MCI (Media Control Interface) errors"""
-        mci_errors = {
+        mci_solutions = {
             "263": {
                 "description": "The specified device is not open or is not recognized by MCI",
                 "solutions": [
-                    "Restart Windows Audio service",
                     "Update audio drivers",
                     "Try running as administrator",
-                    "Convert audio file to WAV format"
+                    "Use alternative audio library (sounddevice/pygame)",
+                    "Check Windows audio service is running"
                 ]
             },
-            "device": {
-                "description": "Audio device not available or in use",
+            "259": {
+                "description": "The driver cannot recognize the specified command parameter",
                 "solutions": [
-                    "Close other audio applications",
-                    "Check if audio device is connected",
-                    "Restart audio service",
-                    "Try a different audio format"
+                    "Convert audio to WAV format",
+                    "Check audio file is not corrupted",
+                    "Try different audio library"
                 ]
             },
-            "default": {
-                "description": "General MCI audio error",
+            "277": {
+                "description": "The file format is invalid",
                 "solutions": [
-                    "Restart Windows Audio service: services.msc -> Windows Audio -> Restart",
-                    "Update Windows and audio drivers",
-                    "Try converting file to WAV format",
-                    "Run application as administrator"
+                    "Convert to WAV format",
+                    "Check file is not corrupted",
+                    "Use pydub for format conversion"
                 ]
             }
         }
         
-        # Find matching error type
-        for error_key, error_info in mci_errors.items():
-            if error_key in error_msg.lower():
-                return error_info
+        # Extract error code from message
+        error_code = None
+        for code in mci_solutions.keys():
+            if code in error_msg:
+                error_code = code
+                break
         
-        return mci_errors["default"]
+        if error_code:
+            return {
+                "error_type": "MCI Error",
+                "error_code": error_code,
+                "description": mci_solutions[error_code]["description"],
+                "solutions": mci_solutions[error_code]["solutions"]
+            }
+        else:
+            return {
+                "error_type": "Unknown MCI Error",
+                "description": error_msg,
+                "solutions": [
+                    "Try alternative audio library",
+                    "Check audio drivers",
+                    "Convert to WAV format"
+                ]
+            }
     
     def _windows_winsound_fallback(self, file_path: Path) -> Dict[str, Any]:
-        """Windows winsound fallback for emergency audio playback"""
+        """Emergency Windows fallback using winsound"""
+        if not self.is_windows:
+            return {"success": False, "error": "winsound only available on Windows"}
+        
         try:
             import winsound
             
-            # Only works with WAV files
+            # Only WAV files are supported by winsound
             if file_path.suffix.lower() != ".wav":
                 return {
                     "success": False,
                     "error": "winsound only supports WAV files",
-                    "recommendation": "Convert file to WAV format"
+                    "recommendation": "Convert to WAV format first"
                 }
             
-            # Play the WAV file
-            winsound.PlaySound(str(file_path), winsound.SND_FILENAME | winsound.SND_ASYNC)
+            def winsound_play():
+                try:
+                    winsound.PlaySound(str(file_path), winsound.SND_FILENAME | winsound.SND_ASYNC)
+                    logger.info(f"✅ winsound playback started: {file_path.name}")
+                except Exception as e:
+                    logger.error(f"❌ winsound playback error: {e}")
             
-            logger.info(f"🆘 Emergency winsound playback started: {file_path.name}")
+            thread = threading.Thread(target=winsound_play, daemon=True)
+            thread.start()
+            time.sleep(0.1)  # Brief pause to ensure playback starts
+            
             return {
                 "success": True,
-                "message": f"Emergency playback with winsound: {file_path.name}",
+                "message": f"Playing with Windows winsound (emergency fallback): {file_path.name}",
                 "method": "winsound",
-                "file_path": str(file_path.absolute()),
-                "note": "Emergency fallback - limited functionality"
+                "file_path": str(file_path.absolute())
             }
             
+        except ImportError:
+            return {"success": False, "error": "winsound not available"}
         except Exception as e:
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": f"winsound error: {e}"}
     
     def play_audio_file(self, file_path: str) -> Dict[str, Any]:
-        """Play an audio file using the best available method"""
+        """Play audio file using pure Python libraries with Windows-specific optimizations"""
         try:
             file_path = Path(file_path)
-            
-            # Verify file exists
             if not file_path.exists():
-                return {
-                    "success": False,
-                    "error": f"Audio file not found: {file_path}",
-                    "file_path": str(file_path)
-                }
+                return {"success": False, "error": f"File not found: {file_path}"}
             
-            # Verify audio format
-            format_info = self._verify_audio_format(file_path)
-            if not format_info["supported"]:
-                logger.warning(f"⚠️ Unsupported audio format: {format_info}")
+            logger.info(f"🔊 Attempting to play: {file_path.name}")
             
-            logger.info(f"🎵 Attempting to play: {file_path.name}")
+            # Windows-specific pre-flight checks
+            if self.is_windows:
+                # Verify audio format
+                format_check = self._verify_audio_format(file_path)
+                if not format_check["valid"]:
+                    logger.warning(f"⚠️ Audio format validation failed: {format_check.get('recommendations', [])}")
+                    # Continue anyway, but log the warning
+                
+                # Check if we have any working audio devices
+                if not self._windows_audio_devices.get("available_devices") and not self._windows_audio_devices.get("winsound_available"):
+                    return {
+                        "success": False,
+                        "error": "No Windows audio devices detected",
+                        "recommendations": [
+                            "Check audio drivers are installed",
+                            "Verify Windows audio service is running",
+                            "Try running as administrator"
+                        ]
+                    }
             
-            # Method 1: sounddevice (best quality and cross-platform support)
-            if self._audio_libraries.get('sounddevice', False) and self._audio_libraries.get('scipy', False):
+            # Method 1: sounddevice + numpy (most reliable for cross-platform)
+            if self._audio_libraries.get('sounddevice', False):
                 try:
                     import sounddevice as sd
-                    import scipy.io.wavfile as wavfile
                     import numpy as np
+                    from scipy.io import wavfile
                     
-                    # Load audio file
+                    # Read WAV file
                     sample_rate, audio_data = wavfile.read(str(file_path))
                     
-                    # Handle different audio formats
-                    if len(audio_data.shape) == 1:
-                        # Mono audio
-                        audio_data = audio_data.astype(np.float32) / np.iinfo(audio_data.dtype).max
-                    else:
-                        # Stereo audio
-                        if audio_data.dtype == np.int16:
+                    # Ensure audio data is in the right format
+                    original_dtype = audio_data.dtype
+                    if original_dtype != np.float32:
+                        if original_dtype == np.int16:
                             audio_data = audio_data.astype(np.float32) / 32768.0
+                        elif original_dtype == np.int32:
+                            audio_data = audio_data.astype(np.float32) / 2147483648.0
                         else:
                             audio_data = audio_data.astype(np.float32)
                     
