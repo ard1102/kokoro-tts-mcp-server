@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  # Kokoro FastAPI TTS Engine - Required dependency
+  kokoro-fastapi:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+    container_name: kokoro-fastapi
+    ports:
+      - "8880:8880"
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8880/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - kokoro-network
+
+  # MCP Server - Main application
+  kokoro-tts-mcp:
+    build: .
+    # Uncomment the line below to use the Docker Hub image instead of building locally
+    # image: rockstar837/kokoro-tts-mcp-server:latest
+    
+    container_name: kokoro-tts-mcp
+    
+    ports:
+      - "3000:3000"
+    
+    environment:
+      - PYTHONUNBUFFERED=1
+      - OUTPUT_DIR=/app/output
+      - MCP_SERVER_MODE=http
+      - KOKORO_API_URL=http://kokoro-fastapi:8880
+    
+    # volumes:
+      # Uncomment to persist generated audio files
+      # - ./audio_output:/app/output
+      
+      # Uncomment for development (mount source code)
+      # - .:/app
+    
+    depends_on:
+      kokoro-fastapi:
+        condition: service_healthy
+    
+    restart: unless-stopped
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    networks:
+      - kokoro-network
+    
+    # Uncomment for development debugging
+    # stdin_open: true
+    # tty: true
+
+# Network for service communication
+networks:
+  kokoro-network:
+    driver: bridge
+
+# Uncomment the volumes section if you want to persist data
+# volumes:
+#   audio_data:
+#     driver: local

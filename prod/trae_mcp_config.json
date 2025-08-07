@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "kokoro-tts": {
+      "command": "python",
+      "args": ["start_mcp_server.py", "--mode", "stdio"],
+      "cwd": "${MCP_SERVER_PATH:-${workspaceFolder}/prod}",
+      "env": {
+        "KOKORO_BASE_URL": "${KOKORO_BASE_URL:-http://localhost:8880}",
+        "PYTHONPATH": "${MCP_SERVER_PATH:-${workspaceFolder}/prod}"
+      }
+    }
+  }
+}
