@@ -1,0 +1,105 @@
+# Kokoro TTS MCP Server - Public Docker Compose
+# Download and run: wget https://raw.githubusercontent.com/ard1102/kokoro-tts-mcp-server/main/docker-compose.public.yml
+# Start: DOCKER_HUB_USERNAME=ard1102 docker compose -f docker-compose.public.yml up -d
+
+version: '3.8'
+
+services:
+  kokoro-fastapi:
+    image: ${DOCKER_HUB_USERNAME:-ard1102}/kokoro-fastapi:latest
+    container_name: kokoro-fastapi
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+
+  kokoro-tts-mcp:
+    image: ${DOCKER_HUB_USERNAME:-ard1102}/kokoro-tts-mcp:latest
+    container_name: kokoro-tts-mcp
+    ports:
+      - "3000:3000"
+    environment:
+      - KOKORO_BASE_URL=http://kokoro-fastapi:8000
+      - PYTHONUNBUFFERED=1
+      - MCP_SERVER_MODE=http
+    volumes:
+      - ./output:/app/output
+    depends_on:
+      kokoro-fastapi:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+networks:
+  default:
+    name: kokoro-tts-network
+
+# Usage Instructions:
+# 
+# 1. Download this file:
+#    wget https://raw.githubusercontent.com/ard1102/kokoro-tts-mcp-server/main/docker-compose.public.yml
+# 
+# 2. Set your Docker Hub username (optional, defaults to ard1102):
+#    export DOCKER_HUB_USERNAME=your-username
+# 
+# 3. Start the services:
+#    docker compose -f docker-compose.public.yml up -d
+# 
+# 4. Check status:
+#    docker compose -f docker-compose.public.yml ps
+# 
+# 5. View logs:
+#    docker compose -f docker-compose.public.yml logs -f
+# 
+# 6. Stop services:
+#    docker compose -f docker-compose.public.yml down
+# 
+# 7. Update to latest:
+#    docker compose -f docker-compose.public.yml pull
+#    docker compose -f docker-compose.public.yml up -d
+# 
+# MCP Configuration Examples:
+# 
+# For IDEs (Stdio mode - recommended):
+# {
+#   "mcpServers": {
+#     "kokoro-tts": {
+#       "command": "docker",
+#       "args": ["exec", "-i", "kokoro-tts-mcp", "python", "/app/kokoro_tts_mcp.py"]
+#     }
+#   }
+# }
+# 
+# For IDEs (HTTP mode):
+# {
+#   "mcpServers": {
+#     "kokoro-tts": {
+#       "command": "npx",
+#       "args": ["-y", "@modelcontextprotocol/server-fetch", "http://localhost:3000"]
+#     }
+#   }
+# }
